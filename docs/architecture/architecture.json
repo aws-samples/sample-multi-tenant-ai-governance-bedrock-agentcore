@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Multi-tenant AI agent governance with Amazon Bedrock AgentCore",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "architecture.html"
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "MCP client",
+      "sublabel": "Claude Code, Cursor",
+      "pos": [
+        40,
+        220
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "cognito",
+      "type": "security",
+      "label": "Amazon Cognito",
+      "sublabel": "ID token + custom:tenant",
+      "pos": [
+        300,
+        10
+      ],
+      "size": [
+        170,
+        62
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "security",
+      "label": "AgentCore Gateway",
+      "sublabel": "single MCP endpoint",
+      "pos": [
+        300,
+        220
+      ],
+      "size": [
+        170,
+        62
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "security",
+      "label": "AgentCore Policy",
+      "sublabel": "Cedar + guardrail rules",
+      "pos": [
+        590,
+        340
+      ],
+      "size": [
+        170,
+        62
+      ]
+    },
+    {
+      "id": "finance",
+      "type": "backend",
+      "label": "finance-reports",
+      "sublabel": "Lambda target",
+      "pos": [
+        870,
+        170
+      ],
+      "size": [
+        160,
+        62
+      ],
+      "tag": "finance"
+    },
+    {
+      "id": "jira",
+      "type": "backend",
+      "label": "jira-search",
+      "sublabel": "Lambda target",
+      "pos": [
+        870,
+        270
+      ],
+      "size": [
+        160,
+        62
+      ],
+      "tag": "engineering"
+    },
+    {
+      "id": "guardrails",
+      "type": "security",
+      "label": "Bedrock Guardrails",
+      "sublabel": "PROMPT_ATTACK",
+      "pos": [
+        1130,
+        560
+      ],
+      "size": [
+        170,
+        62
+      ]
+    },
+    {
+      "id": "logs",
+      "type": "database",
+      "label": "CloudWatch Logs",
+      "sublabel": "policy decisions",
+      "pos": [
+        300,
+        450
+      ],
+      "size": [
+        170,
+        62
+      ]
+    },
+    {
+      "id": "dashboard",
+      "type": "frontend",
+      "label": "Dashboard",
+      "sublabel": "React on CloudFront + S3",
+      "pos": [
+        40,
+        560
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Dashboard API",
+      "sublabel": "API Gateway + Lambda",
+      "pos": [
+        300,
+        560
+      ],
+      "size": [
+        170,
+        62
+      ]
+    },
+    {
+      "id": "registry",
+      "type": "database",
+      "label": "AWS Agent Registry",
+      "sublabel": "catalogue + approval",
+      "pos": [
+        300,
+        670
+      ],
+      "size": [
+        170,
+        62
+      ],
+      "tag": "not consulted by Gateway"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Request path: every tool call",
+      "wraps": [
+        "gateway",
+        "policy",
+        "finance",
+        "jira"
+      ],
+      "pad": 18
+    },
+    {
+      "kind": "security-group",
+      "label": "Management plane",
+      "wraps": [
+        "dashboard",
+        "api",
+        "registry"
+      ],
+      "pad": 18
+    }
+  ],
+  "connections": [
+    {
+      "from": "client",
+      "to": "cognito",
+      "label": "1 sign in",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "from": "client",
+      "to": "gateway",
+      "label": "2 MCP + ID token",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gateway",
+      "to": "cognito",
+      "label": "3 validate JWT",
+      "variant": "dashed"
+    },
+    {
+      "from": "gateway",
+      "to": "policy",
+      "label": "4 authorize: tenant + injection",
+      "variant": "security"
+    },
+    {
+      "from": "gateway",
+      "to": "finance",
+      "label": "5 invoke",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gateway",
+      "to": "jira",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gateway",
+      "to": "logs",
+      "label": "decisions + guardrail scores",
+      "variant": "dashed",
+      "labelAt": [
+        385,
+        366
+      ]
+    },
+    {
+      "from": "dashboard",
+      "to": "api",
+      "label": "ID token"
+    },
+    {
+      "from": "api",
+      "to": "registry",
+      "label": "register, approve",
+      "labelAt": [
+        385,
+        646
+      ]
+    },
+    {
+      "from": "api",
+      "to": "guardrails",
+      "label": "scan description",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "from": "api",
+      "to": "logs",
+      "label": "audit query",
+      "variant": "dashed"
+    },
+    {
+      "from": "policy",
+      "to": "guardrails",
+      "label": "score arguments",
+      "variant": "security"
+    }
+  ]
+}

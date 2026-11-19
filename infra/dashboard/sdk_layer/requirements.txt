@@ -1,0 +1,4 @@
+# Installed into a Lambda layer for the dashboard API: the Lambda Python runtime
+# ships a boto3 that predates the agent-registry service. Pinned so the layer
+# is reproducible; every package it pulls in is a pure-Python wheel.
+boto3==1.43.127

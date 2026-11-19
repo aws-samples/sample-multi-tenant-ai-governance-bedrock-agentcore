@@ -1,0 +1,37 @@
+.venv/
+__pycache__/
+*.pyc
+cdk.out/
+# Built before deploy by the pip install step in the README.
+infra/dashboard/sdk_layer/build/
+
+# Node / frontend build. dashboard/.gitignore covers these too; repeated here so
+# a clone from the root behaves the same way if that file is ever removed.
+node_modules/
+dist/
+*.tsbuildinfo
+
+# AI coding assistant and agent tooling (Claude Code, ADP, Kiro). Local to each
+# machine and never part of the sample: these hold personal settings, skills, MCP
+# server names and permission allowlists that mean nothing to anyone else.
+.claude/
+.adp-rules/
+agent_context/
+.kiro/
+aidlc/
+
+# macOS and editor droppings
+.DS_Store
+*.swp
+
+# Never commit a token or a password. Nothing in this repo reads a .env — the
+# scripts take credentials as arguments — but the pattern is here so an
+# improvised one cannot be added by accident.
+.env
+.env.*
+
+# ASH security scan: output, config and runner script are kept local only,
+# not part of the sample.
+.ash/
+.ash.yaml
+scripts/run-ash.sh

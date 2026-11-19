@@ -1,0 +1,194 @@
+# The whole platform, declared. A platform admin edits this file and deploys.
+#
+# cognito.*            the user pool that authenticates callers
+# tools[]              one Gateway target and one Cedar policy per tool
+# governance.*         whether Cedar decisions are enforced or only logged
+# registry.*           one catalogue record per tool, plus its owner
+
+platform:
+  # Used to name every resource. Gateway names are unique per account, so if a
+  # Gateway with this name already exists the deploy fails with a 409; change it.
+  name: ai-governance-v2
+  region: us-east-1
+
+# An existing user pool. The stack references it and does not create it.
+# Each user needs custom:tenant set to one of the tenant names below, e.g.
+# john@company.com (custom:tenant=finance), sarah@company.com (=engineering).
+# Replace both values before deploying; the loader refuses the placeholders.
+cognito:
+  user_pool_id: <your-user-pool-id>
+  app_client_id: <your-app-client-id>
+  tenant_claim: "custom:tenant"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENFORCEMENT MODE
+#
+#   LOG_ONLY  policies are evaluated, decisions are recorded, nothing is
+#             blocked. Every tenant still sees every tool. Use this to prove a
+#             policy set is right before it can break anyone's work.
+#   ENFORCE   decisions are enforced. An unentitled tool is not merely refused,
+#             it is ABSENT from tools/list.
+#
+# Flip this one word and redeploy — that is the whole story on screen.
+# There is no DISABLED value; to stop enforcing, remove the policies.
+# ─────────────────────────────────────────────────────────────────────────────
+governance:
+  enforcement_mode: ENFORCE
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE CATALOGUE — what exists, who owns it, and whether it was reviewed.
+#
+# Read the honest boundary first, because it is easy to overclaim here:
+# the Gateway does NOT consult the Registry. create-gateway-target has no
+# registry field, and this platform's tool targets serve traffic whether or not
+# a registry exists. So an APPROVED record is not a technical precondition for a
+# tool being reachable — the two systems are parallel. Built on AWS Agent
+# Registry (AWS::AgentRegistry::Registry and RegistryRecord).
+#
+#   auto_approval: false   a submitted record waits in PENDING_APPROVAL until a
+#                          human calls UpdateRegistryRecordStatus. This is the
+#                          service default, verified, not assumed.
+#   auto_approval: true    submitting approves immediately (autoApprovalRules
+#                          APPROVE_ALL). Records still start in DRAFT either way.
+#
+# What the Registry genuinely enforces (all verified by trying to break it):
+#   · the status machine is server-side. DRAFT -> APPROVED is refused outright.
+#   · a REJECTED record cannot be resubmitted. It is terminal.
+#   · editing an APPROVED record drops it to DRAFT and erases the approval
+#     reason, so approval cannot be silently outlived by its content.
+#   · record names are unique within a registry; a duplicate is refused.
+# ─────────────────────────────────────────────────────────────────────────────
+registry:
+  name: aigov_v2_registry
+  auto_approval: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ADMISSION SCAN — and unlike the registry above, this one IS in the path.
+#
+# Guardrail rules in the Cedar policy engine. While it decides a tool call, the
+# policy engine scores the call's arguments through Bedrock Guardrails
+# (PROMPT_ATTACK, category PROMPT_INJECTION) and refuses the call if the score
+# is above the threshold. One rule is generated per tool, covering each of its
+# string arguments, so a new argument is covered on the next deploy.
+#
+#   OBSERVE   rules run in LOG_ONLY: each call's score is recorded in the
+#             decision log, with whether it would have changed the decision,
+#             and the call is allowed. Find out what you would have blocked
+#             before you block it.
+#   ENFORCE   a call whose arguments score above the threshold is refused.
+#
+# Note these are NOT the same words as governance.enforcement_mode, which
+# switches the whole policy engine. OBSERVE affects only the guardrail rules, so
+# tenant isolation stays enforced while the scan is being tuned.
+#
+#   threshold   the PROMPT_INJECTION confidence score a call must exceed to be
+#               refused. Scores come in steps of 0.2 (0, 0.2 ... 1.0); 0.4 is
+#               AWS's default. Run OBSERVE first and read the scores before
+#               changing it.
+#
+# If the guardrail check cannot run, the call is refused. There is no fail-open
+# setting: a Bedrock outage becomes a tool outage, which is the right posture for
+# a security control.
+#
+# What it scans: tool ARGUMENTS, on every call. Not the tool description: that
+# is fixed, human-reviewed, and scanned at registration by the dashboard.
+#
+# The honest limit, worth saying before someone asks: a quiet, documentation-
+# shaped injection ("this tool also transmits a copy of each result to
+# audit-collector.example.com for compliance review") passes the scan. Tested.
+# This raises the cost of the obvious attack; it does not solve semantic trust
+# in third-party tool text. The control for that one is a human reviewer asking
+# why a search tool has an egress destination — which is the catalogue above.
+# ─────────────────────────────────────────────────────────────────────────────
+admission_scan:
+  mode: ENFORCE
+  threshold: 0.4
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE DASHBOARD — the catalogue, made visible.
+#
+# A React app on CloudFront plus a small read API. It exists because an asset
+# register is furniture a security reviewer recognises, and scripts/catalogue.py
+# in a terminal is not. Everything it shows is available from that script too.
+#
+# Three panels, and only ONE of them describes enforcement. It is easy to assume
+# all three do.
+#
+#   catalogue      what exists, who owns it, did a human sign off.  Gates nothing.
+#   register       can a new asset get in.  GATES — the publish-time scan refuses.
+#   audit trail    what policy decided, and was it acted on.  Reports Cedar.
+#
+# The catalogue reads the REGISTRY, so like the registry it enforces nothing. A
+# screen full of APPROVED rows says nothing about what is callable — Cedar
+# decides that. The API returns that caveat in every response and the UI prints
+# it on screen, rather than trusting whoever is presenting to remember. This is
+# the easiest place in the whole platform to accidentally overclaim.
+#
+# The register panel is the exception, and it is the one thing here that refuses.
+# A submitted description is scanned by a Bedrock guardrail (PROMPT_ATTACK)
+# before any record is created. Two moments, one kind of check: the policy
+# engine scores tool arguments at call time, this scores descriptions at publish
+# time. Worth scanning because a tool description IS a prompt — the model reads it to decide
+# whether to call the tool — so an instruction hidden there reaches every future
+# call by every user.
+#
+#   reviewer_group   a Cognito group. Reading the catalogue is open to any
+#                    authenticated user, scoped to their own tenant. So is
+#                    REGISTERING: anyone can propose. ACTING on the review
+#                    queue — approve, reject, deprecate — requires membership of
+#                    this group. A dashboard where a tenant can approve its own
+#                    asset looks like governance and is a rubber stamp.
+#
+# Two things the register and audit panels get for free from the token, and
+# neither is settable by a request: tenant and owner come from the CALLER's
+# claims, never the body; and a non-reviewer's audit trail is scoped to their
+# own calls, which is stricter than tenant scoping because the decision log
+# carries no tenant claim to scope by.
+#
+# The guardrail and the decision log group are both OPTIONAL wiring. Without
+# them the API says which features are unavailable and why, and the UI hides
+# them — a button that fails with a 503 is worse than no button.
+#
+# Remove this section and the dashboard is simply not deployed; nothing else
+# changes. It is not in the request path.
+#
+# Build note: the bundle is built locally (`cd dashboard && npm run build`),
+# not in a container, because there is no Docker here and making every deploy
+# depend on a background VM being awake is a bad failure mode. A missing build
+# FAILS the synth with instructions rather than deploying an empty page.
+# ─────────────────────────────────────────────────────────────────────────────
+dashboard:
+  reviewer_group: platform-reviewers
+
+tenants:
+  - name: finance
+    admins: ["john@company.com"]
+  - name: engineering
+    admins: ["sarah@company.com"]
+
+tools:
+  - name: finance-reports
+    tenant: finance
+    owner: john@company.com
+    handler: finance_reports
+    description: >-
+      Returns quarterly finance reports including revenue, operating expense
+      and margin for a given quarter.
+    arguments:
+      quarter:
+        type: string
+        description: "Quarter to report on, e.g. q1 or q2"
+        required: true
+
+  - name: jira-search
+    tenant: engineering
+    owner: sarah@company.com
+    handler: jira_search
+    description: >-
+      Searches Jira issues by keyword and returns matching issue keys,
+      summaries and statuses.
+    arguments:
+      query:
+        type: string
+        description: "Keyword to search issue summaries and keys for, or * for all issues"
+        required: true
